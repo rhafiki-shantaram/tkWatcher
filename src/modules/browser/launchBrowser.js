@@ -21,9 +21,7 @@ export async function launchBrowser(ctx) {
     "--disable-infobars"
   ];
   const userArgs = Array.isArray(launchOptions.args) ? launchOptions.args : [];
-  const remoteDebuggingPort = readPositiveInt(
-    launchOptions.remoteDebuggingPort || process.env.CDP_REMOTE_DEBUGGING_PORT
-  );
+  const remoteDebuggingPort = readPositiveInt(launchOptions.remoteDebuggingPort);
   const remoteDebuggingArgs = remoteDebuggingPort
     ? [`--remote-debugging-port=${remoteDebuggingPort}`]
     : [];

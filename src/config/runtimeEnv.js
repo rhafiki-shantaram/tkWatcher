@@ -106,3 +106,16 @@ export function readRuntimeEnv(env) {
     loginPollMs: readIntEnv(env.LOGIN_POLL_MS, 1500)
   };
 }
+
+export function createRuntimeLaunchOptions(runtimeEnv) {
+  const { cdpRemoteDebuggingPort = null, navigationTimeoutMs = 120000 } = runtimeEnv || {};
+
+  return {
+    remoteDebuggingPort: Number.isFinite(Number(cdpRemoteDebuggingPort)) && Number(cdpRemoteDebuggingPort) > 0
+      ? Math.floor(Number(cdpRemoteDebuggingPort))
+      : 0,
+    navigationTimeoutMs: Number.isFinite(Number(navigationTimeoutMs)) && Number(navigationTimeoutMs) > 0
+      ? Math.floor(Number(navigationTimeoutMs))
+      : 120000
+  };
+}

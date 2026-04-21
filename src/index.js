@@ -1,4 +1,5 @@
 import {
+  createRuntimeLaunchOptions,
   readRuntimeEnv
 } from "./config/runtimeEnv.js";
 import { createDeps } from "./deps/index.js";
@@ -35,6 +36,7 @@ async function main(ctx) {
   dotenv.config();
 
   const runtimeEnv = readRuntimeEnv(process.env);
+  const launchOptions = createRuntimeLaunchOptions(runtimeEnv);
   const {
     tiktokUrl,
     targetHandles,
@@ -62,7 +64,7 @@ async function main(ctx) {
 
   const { browser, page } = await launchBrowser({
     data: {
-      launchOptions: {}
+      launchOptions
     },
     deps
   });
@@ -90,13 +92,11 @@ async function main(ctx) {
       logger.info("Comment capture enabled. Starting room lifecycle loop.");
       await runCommentLiveCaptureLoop({
         data: {
-          browser,
           watcherPage: page,
-          targetUrl: tiktokUrl,
+          cookiesPath,
           targetHandles,
-          pollMs: 60000,
-          notLiveStreakThreshold: 5,
-          roomTabName: "comment-room"
+          launchOptions,
+          notLiveStreakThreshold: 5
         },
         deps
       });

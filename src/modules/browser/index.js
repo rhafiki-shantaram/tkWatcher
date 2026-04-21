@@ -1,5 +1,5 @@
 export * from "./launchBrowser.js";
-export * from "./createTabSessionManager.js";
+export * from "./launchRoomWindow.js";
 export * from "./detectTargetStatus.js";
 export * from "./loadCookies.js";
 export * from "./probeWatchSignals.js";
@@ -7,3 +7,5 @@ export * from "./runWatchCycle.js";
 export * from "./selfHealTargetPage.js";
 export * from "./saveCookies.js";
 export * from "./waitForLoginComplete.js";
+export * from "./windowBoundaryRegistry.js";
+export * from "./windowOwnershipModel.js";

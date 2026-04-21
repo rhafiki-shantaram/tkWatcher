@@ -30,6 +30,8 @@ export async function probeWatchSignals(ctx) {
     };
 
     const readyState = document.readyState;
+    const title = String(document.title || "").trim();
+    const hasSearchTitle = title.toLowerCase().includes("tiktok search");
     const loginLabels = Array.from(
       document.querySelectorAll("div.TUXButton-label")
     ).map((el) => String(el.innerText || el.textContent || "").trim());
@@ -38,9 +40,9 @@ export async function probeWatchSignals(ctx) {
 
     const bodyText = String(document.body?.innerText || "").toLowerCase();
     const query = normalizeSearchTerm(ctxData.targetUrl);
-    const hasTargetSearchText = query
+    const hasTargetSearchText = hasSearchTitle || (query
       ? bodyText.includes(query.toLowerCase())
-      : false;
+      : false);
     const hasLiveBadge = containsLiveBadge({
       bodyText,
       root: document
@@ -48,6 +50,8 @@ export async function probeWatchSignals(ctx) {
 
     return {
       readyState,
+      title,
+      hasSearchTitle,
       hasLoginLabel,
       hasPasswordField,
       hasTargetSearchText,
@@ -58,6 +62,8 @@ export async function probeWatchSignals(ctx) {
   return {
     pageReady: result.readyState === "complete",
     readyState: result.readyState,
+    title: result.title,
+    hasSearchTitle: result.hasSearchTitle,
     hasLoginLabel: result.hasLoginLabel,
     hasPasswordField: result.hasPasswordField,
     hasTargetSearchText: result.hasTargetSearchText,
