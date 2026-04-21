@@ -1,4 +1,5 @@
 import { captureRoomCommentsTick } from "./captureRoomCommentsTick.js";
+import { detectRoomLiveEndedOverlay } from "./detectRoomLiveEndedOverlay.js";
 import { focusRoomWindow } from "./focusRoomWindow.js";
 import { probeRoomWindowFocus } from "./probeRoomWindowFocus.js";
 import {
@@ -19,10 +20,12 @@ import {
  */
 export async function runRoomCommentCaptureWorker(ctx) {
   const { data = {}, deps, withFocusLock } = ctx;
+  const { logger } = deps;
   const {
     roomState,
     roomHandle = "",
     roomUrl = "",
+    onLiveEnded = null,
     focusCooldownMs = 120000,
     roomTickMs = 500
   } = data;
@@ -39,6 +42,34 @@ export async function runRoomCommentCaptureWorker(ctx) {
     if (!roomState.isLive) {
       await sleep(roomTickMs, deps);
       continue;
+    }
+
+    const liveEndedSignal = await detectRoomLiveEndedOverlay({
+      data: {
+        page: roomState.roomWindow.page
+      },
+      deps
+    });
+
+    if (liveEndedSignal.ended) {
+      if (!roomState.liveEndedDetected) {
+        logger.info(
+          `commentRoom:live_ended_detected handle=${roomHandle || roomState.handle || "(unknown)"} reason=${liveEndedSignal.reason} text=${liveEndedSignal.matchedText || ""}`
+        );
+      }
+      roomState.liveEndedDetected = true;
+      roomState.liveEndedSignal = liveEndedSignal;
+      if (!roomState.liveEndedStopping) {
+        roomState.liveEndedStopping = true;
+        if (typeof onLiveEnded === "function") {
+          await onLiveEnded({
+            roomState,
+            roomHandle: roomHandle || roomState.handle || "",
+            liveEndedSignal
+          });
+        }
+      }
+      return;
     }
 
     const nowMs = Date.now();
@@ -108,6 +139,8 @@ export async function runRoomCommentCaptureWorker(ctx) {
           roomHandle,
           roomUrl: roomState.url || roomUrl,
           captureState: roomState.captureState,
+          profileCacheState: roomState.profileCacheState,
+          commenterBackfillState: roomState.commenterBackfillState,
           focusState
         },
         deps

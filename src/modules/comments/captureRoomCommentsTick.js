@@ -1,9 +1,15 @@
 import { formatCommentConsoleLine } from "./commentConsoleFormat.js";
+import {
+  normalizeCommenterBackfillKey,
+  queueCommenterBackfillCandidate,
+  registerCommenterBackfillRecord
+} from "./commenterBackfillState.js";
+import { resolveCommentProfileBackground } from "./resolveCommentProfileBackground.js";
 
 /**
  * Capture newly observed room comments and emit them to the terminal.
  * @param {{ data?: object, deps: object }} ctx
- * @returns {Promise<{ observed: number, emitted: number }>}
+ * @returns {Promise<{ observed: number, emitted: number, enriched: number }>}
  */
 export async function captureRoomCommentsTick(ctx) {
   const { data = {}, deps } = ctx;
@@ -11,7 +17,10 @@ export async function captureRoomCommentsTick(ctx) {
     page,
     roomHandle = "",
     roomUrl = "",
-    captureState
+    captureState,
+    profileCacheState = null,
+    commenterBackfillState = null,
+    maxProfileResolvesPerTick = 1
   } = data;
   const { logger } = deps;
 
@@ -25,6 +34,10 @@ export async function captureRoomCommentsTick(ctx) {
     throw new Error("Missing captureState.seenCommentKeys set.");
   }
 
+  const profileCacheByUserName = profileCacheState && profileCacheState.byUserName
+    ? profileCacheState.byUserName
+    : null;
+  const profileResolveBudget = Math.max(0, Math.floor(Number(maxProfileResolvesPerTick) || 0));
   const snapshot = await page.evaluate(() => {
     const clean = (value) =>
       String(value || "")
@@ -48,6 +61,7 @@ export async function captureRoomCommentsTick(ctx) {
         sanitizeKey(ownerName.toLowerCase()),
         sanitizeKey(commentText.toLowerCase())
       ].join("|");
+      node.dataset.orderbotCommentKey = key;
 
       return {
         key: key || `comment_${idx}`,
@@ -57,7 +71,9 @@ export async function captureRoomCommentsTick(ctx) {
     });
   });
 
+  const profileResolutionKeys = new Set();
   let emitted = 0;
+  let enriched = 0;
   for (const item of snapshot) {
     if (!item || !item.key) {
       continue;
@@ -69,21 +85,135 @@ export async function captureRoomCommentsTick(ctx) {
       continue;
     }
     captureState.seenCommentKeys.add(item.key);
+    let usedInteractiveCapture = false;
+    let profileName = item.commenter;
+    let profileHref = "";
+    let profileSource = "fallback";
+
+    try {
+      const commenterKey = normalizeCommenterBackfillKey(item.commenter);
+
+      if (commenterKey && profileCacheByUserName && profileCacheByUserName.has(commenterKey)) {
+        const cachedProfile = profileCacheByUserName.get(commenterKey) || {};
+        profileName = String(cachedProfile.profileName || "").trim() || item.commenter;
+        profileHref = String(cachedProfile.profileHref || "").trim();
+        profileSource = String(cachedProfile.profileSource || "cache").trim() || "cache";
+      } else if (commenterKey && profileResolutionKeys.size < profileResolveBudget) {
+        profileResolutionKeys.add(commenterKey);
+        usedInteractiveCapture = true;
+        await closeCommentPopover(page);
+        const resolvedProfile = await resolveCommentProfileBackground({
+          data: {
+            page,
+            waitMs: 4000,
+            revealPopover: async () => {
+              await clickCommentUser({
+                data: {
+                  page,
+                  key: item.key
+                },
+                deps
+              });
+            }
+          },
+          deps
+        });
+
+        profileName = String(resolvedProfile.profileName || "").trim() || item.commenter;
+        profileHref = String(resolvedProfile.profileHref || "").trim();
+        profileSource = String(resolvedProfile.source || "").trim() || "fallback";
+
+        if (profileCacheByUserName) {
+          profileCacheByUserName.set(commenterKey, {
+            userNameKey: commenterKey,
+            commentUserName: item.commenter,
+            profileName,
+            profileHref,
+            profileSource
+          });
+        }
+        if (profileName || profileHref) {
+          enriched += 1;
+        }
+      } else if (commenterKey && profileCacheByUserName && !profileCacheByUserName.has(commenterKey)) {
+        profileCacheByUserName.set(commenterKey, {
+          userNameKey: commenterKey,
+          commentUserName: item.commenter,
+          profileName,
+          profileHref: "",
+          profileSource
+        });
+      }
+    } catch (error) {
+      logger.info(
+        `commentRoom:comment_enrich_error handle=${roomHandle || "(unknown)"} error=${error.message || error}`
+      );
+    } finally {
+      if (usedInteractiveCapture) {
+        await closeCommentPopover(page);
+        try {
+          await page.bringToFront();
+        } catch {
+          // Best effort.
+        }
+      }
+    }
+
     logger.info(
       formatCommentConsoleLine({
         roomHandle,
         roomUrl,
         commenter: item.commenter,
         text: item.text,
-        source: "dom"
+        source: "dom",
+        profileName,
+        profileHref,
+        profileSource
       })
     );
+    const queuedResult = queueCommenterBackfillCandidate({
+      data: {
+        state: commenterBackfillState,
+        commentUserName: item.commenter,
+        profileName,
+        profileHref,
+        profileSource,
+        seenAt: Date.now()
+      },
+      deps
+    });
+    if (queuedResult && queuedResult.queued) {
+      logger.info(
+        [
+          "commentBackfill:queued",
+          `handle=${roomHandle || "(unknown)"}`,
+          `commenter=${item.commenter}`,
+          `normalizedKey=${queuedResult.normalizedKey || "(unknown)"}`,
+          `status=${String(queuedResult.entry?.status || "pending")}`,
+          `queueSize=${Array.isArray(commenterBackfillState?.queue) ? commenterBackfillState.queue.length : 0}`
+        ].join(" ")
+      );
+    }
+    registerCommenterBackfillRecord({
+      data: {
+        state: captureState,
+        commentKey: item.key,
+        commentUserName: item.commenter,
+        text: item.text,
+        profileName,
+        profileHref,
+        profileSource,
+        emittedAt: Date.now()
+      },
+      deps
+    });
     emitted += 1;
   }
 
   return {
     observed: snapshot.length,
-    emitted
+    emitted,
+    enriched
   };
 }
 
@@ -93,6 +223,107 @@ export async function captureRoomCommentsTick(ctx) {
  */
 export function createRoomCommentCaptureState() {
   return {
-    seenCommentKeys: new Set()
+    seenCommentKeys: new Set(),
+    byCommentKey: new Map(),
+    commentKeysByUserName: new Map()
   };
+}
+
+async function clickCommentUser(ctx) {
+  const { data = {}, deps } = ctx;
+  const { page, key } = data;
+
+  const clicked = await page.evaluate((commentKey) => {
+    const root = Array.from(document.querySelectorAll('div[data-e2e="chat-message"]')).find(
+      (node) => String(node.dataset.orderbotCommentKey || "") === String(commentKey || "")
+    ) || null;
+    if (!root) {
+      return false;
+    }
+
+    const clickNode = (node) => {
+      if (!node) {
+        return false;
+      }
+      node.scrollIntoView?.({ behavior: "instant", block: "center" });
+      try {
+        node.click?.();
+      } catch {
+        // Fall through to synthetic click.
+      }
+      node.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window
+        })
+      );
+      return true;
+    };
+
+    const ownerNameEl = root.querySelector('[data-e2e="message-owner-name"]');
+    const avatarImg = root.querySelector("img");
+    const avatarContainer = avatarImg?.parentElement || null;
+
+    if (clickNode(ownerNameEl) || clickNode(avatarContainer) || clickNode(avatarImg)) {
+      return true;
+    }
+
+    return false;
+  }, key);
+
+  if (!clicked) {
+    throw new Error(`Failed to click comment user for key=${key}`);
+  }
+}
+
+async function closeCommentPopover(page) {
+  try {
+    const clicked = await page.evaluate(() => {
+      const closeIcon = Array.from(document.querySelectorAll('svg.text-color-TextReverse2')).find(
+        (node) => String(node.getAttribute("viewBox") || "") === "0 0 48 48"
+      ) || null;
+      const closeButton = closeIcon?.parentElement || closeIcon?.closest("div.cursor-pointer") || null;
+      if (!closeButton) {
+        return false;
+      }
+      try {
+        closeButton.click?.();
+      } catch {
+        // Fall through to synthetic click.
+      }
+      closeButton.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window
+        })
+      );
+      return true;
+    });
+    if (clicked) {
+      return;
+    }
+  } catch {
+    // Best effort.
+  }
+  try {
+    await page.keyboard.press("Escape");
+  } catch {
+    // Best effort.
+  }
+  try {
+    await page.waitForFunction(
+      () => !Array.from(document.querySelectorAll("div.absolute.h-auto")).some((popover) => {
+        const name = popover.querySelector("div.P2-Bold");
+        const profileLink = popover.querySelector('a[href^="/@"]');
+        return !!(name || profileLink);
+      }),
+      { timeout: 300 }
+    );
+  } catch {
+    // Best effort.
+  }
 }

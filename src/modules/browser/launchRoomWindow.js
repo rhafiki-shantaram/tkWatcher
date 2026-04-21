@@ -103,10 +103,6 @@ function readPositiveInt(value, fallback) {
 
 async function resolveRoomRemoteDebuggingPort(ctx) {
   const { launchOptions = {} } = ctx;
-  const explicitPort = readPositiveInt(launchOptions.remoteDebuggingPort, 0);
-  if (explicitPort > 0) {
-    return explicitPort;
-  }
   return await findFreePortFrom(0);
 }
 

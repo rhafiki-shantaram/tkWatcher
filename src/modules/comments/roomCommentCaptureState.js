@@ -26,12 +26,18 @@ export function createRoomCommentCaptureSessionState(ctx) {
     notLiveStreak: 0,
     focusMissUntil: 0,
     captureState: createRoomCommentCaptureState(),
+    profileCacheState: data.profileCacheState || null,
+    commenterBackfillState: data.commenterBackfillState || null,
+    liveEndedDetected: false,
+    liveEndedSignal: null,
+    liveEndedStopping: false,
     userDataDir,
     remoteDebuggingPort,
     networkStream,
     previousNetworkSnapshot: null,
     networkActivity: null,
     stopping: false,
+    commenterBackfillWorkerPromise: null,
     workerPromise: null
   };
 }
@@ -44,6 +50,9 @@ export function markRoomCommentCaptureLive(roomState, liveRoomUrl) {
   roomState.isLive = true;
   roomState.url = String(liveRoomUrl || roomState.url || "");
   roomState.notLiveStreak = 0;
+  roomState.liveEndedDetected = false;
+  roomState.liveEndedSignal = null;
+  roomState.liveEndedStopping = false;
   return roomState;
 }
 
@@ -91,6 +100,15 @@ export function setRoomCommentCaptureWorkerPromise(roomState, workerPromise) {
   }
 
   roomState.workerPromise = workerPromise || null;
+  return roomState;
+}
+
+export function setRoomCommenterBackfillWorkerPromise(roomState, workerPromise) {
+  if (!roomState) {
+    return roomState;
+  }
+
+  roomState.commenterBackfillWorkerPromise = workerPromise || null;
   return roomState;
 }
 

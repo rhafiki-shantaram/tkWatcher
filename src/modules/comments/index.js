@@ -1,7 +1,9 @@
 export * from "./commentCaptureSurfaces.js";
 export * from "./commentConsoleFormat.js";
+export * from "./commenterBackfillState.js";
 export * from "./captureCommentProfileWithSemantics.js";
 export * from "./captureRoomCommentsTick.js";
+export * from "./detectRoomLiveEndedOverlay.js";
 export * from "./commentCaptureStageError.js";
 export * from "./classifyRoomNetworkActivity.js";
 export * from "./focusRoomWindow.js";
@@ -15,6 +17,7 @@ export * from "./roomNetworkSignalSurface.js";
 export * from "./roomConsoleFormat.js";
 export * from "./roomCommentCaptureState.js";
 export * from "./resolveRoomCommentCapturePolicy.js";
+export * from "./runCommenterBackfillWorker.js";
 export * from "./runRoomCommentCaptureWorker.js";
 export * from "./roomCommentCaptureLifecycle.js";
 export * from "./runCommentLiveCaptureLoop.js";

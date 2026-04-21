@@ -6,8 +6,10 @@ import {
   markRoomCommentCaptureLive,
   markRoomCommentCaptureNotLive,
   markRoomCommentCaptureStopping,
+  setRoomCommenterBackfillWorkerPromise,
   setRoomCommentCaptureWorkerPromise
 } from "./roomCommentCaptureState.js";
+import { runCommenterBackfillWorker } from "./runCommenterBackfillWorker.js";
 import { runRoomCommentCaptureWorker } from "./runRoomCommentCaptureWorker.js";
 
 /**
@@ -22,10 +24,16 @@ export async function syncRoomCommentCaptureSession(ctx) {
     liveRoom = null,
     roomRegistry,
     boundaryRegistry,
+    sharedProfileCacheState = null,
+    sharedCommenterBackfillState = null,
     cookiesPath = "",
     launchOptions = {},
     focusCooldownMs = 120000,
     roomTickMs = 500,
+    backfillBatchSize = 2,
+    backfillTickMs = 500,
+    backfillWaitMs = 2500,
+    backfillRetryDelayMs = 3000,
     notLiveStreakThreshold = 5
   } = data;
 
@@ -46,10 +54,16 @@ export async function syncRoomCommentCaptureSession(ctx) {
         liveRoom,
         roomRegistry,
         boundaryRegistry,
+        sharedProfileCacheState,
+        sharedCommenterBackfillState,
         cookiesPath,
         launchOptions,
         focusCooldownMs,
-        roomTickMs
+        roomTickMs,
+        backfillBatchSize,
+        backfillTickMs,
+        backfillWaitMs,
+        backfillRetryDelayMs
       },
       deps,
       withFocusLock
@@ -129,10 +143,17 @@ async function startRoomCommentCaptureSession(ctx) {
     liveRoom = null,
     roomRegistry,
     boundaryRegistry,
+    sharedProfileCacheState = null,
+    sharedCommenterBackfillState = null,
     cookiesPath = "",
     launchOptions = {},
     focusCooldownMs = 120000,
-    roomTickMs = 500
+    roomTickMs = 500,
+    backfillBatchSize = 2,
+    backfillTickMs = 500,
+    backfillWaitMs = 2500,
+    backfillRetryDelayMs = 3000,
+    requestWatcherRefresh = null
   } = data;
   const { logger } = deps;
 
@@ -173,7 +194,9 @@ async function startRoomCommentCaptureSession(ctx) {
       liveRoomSource: liveRoom.source,
       userDataDir: roomWindow.userDataDir,
       remoteDebuggingPort: roomWindow.remoteDebuggingPort,
-      networkStream
+      networkStream,
+      profileCacheState: sharedProfileCacheState,
+      commenterBackfillState: sharedCommenterBackfillState
     }
   });
 
@@ -186,12 +209,46 @@ async function startRoomCommentCaptureSession(ctx) {
   });
 
   setRoomCommentCaptureWorkerPromise(roomState, runRoomCommentCaptureWorker({
+      data: {
+        roomState,
+        roomHandle: handle,
+        roomUrl: liveRoom.url,
+        onLiveEnded: async () => {
+          await stopRoomCommentCaptureSession({
+            data: {
+              handle,
+              roomState,
+              roomRegistry,
+              boundaryRegistry
+            },
+            deps
+          });
+          if (typeof requestWatcherRefresh === "function") {
+            await requestWatcherRefresh("live_ended_overlay");
+          }
+        },
+        focusCooldownMs,
+        roomTickMs,
+        backfillBatchSize,
+        backfillTickMs,
+        backfillWaitMs,
+        backfillRetryDelayMs
+      },
+    deps,
+    withFocusLock
+  }).catch((error) => {
+    logger.error(formatRoomWorkerError(error));
+  }));
+
+  setRoomCommenterBackfillWorkerPromise(roomState, runCommenterBackfillWorker({
     data: {
       roomState,
       roomHandle: handle,
       roomUrl: liveRoom.url,
-      focusCooldownMs,
-      roomTickMs
+      batchSize: backfillBatchSize,
+      backfillTickMs,
+      backfillWaitMs,
+      backfillRetryDelayMs
     },
     deps,
     withFocusLock
@@ -204,6 +261,7 @@ async function startRoomCommentCaptureSession(ctx) {
 
 async function stopRoomCommentCaptureSession(ctx) {
   const { data = {}, deps } = ctx;
+  const { logger } = deps;
   const {
     handle = "",
     roomState,
@@ -214,12 +272,25 @@ async function stopRoomCommentCaptureSession(ctx) {
   if (!roomState) {
     return false;
   }
+  if (roomState.stopping && (!roomRegistry || !roomRegistry.activeRooms || !roomRegistry.activeRooms.has(handle || roomState.handle))) {
+    return false;
+  }
 
   markRoomCommentCaptureStopping(roomState);
+  logger.info(
+    `commentRoom:room_closing handle=${handle || roomState.handle || "(unknown)"} reason=${roomState.liveEndedDetected ? "live_ended_overlay" : "not_live"}`
+  );
   await closeRoomNetworkStream(roomState.networkStream);
   await closeRoomWindow(roomState.roomWindow);
-  boundaryRegistry.removeRoomWindow(handle || roomState.handle);
-  roomRegistry.activeRooms.delete(handle || roomState.handle);
+  if (boundaryRegistry && typeof boundaryRegistry.removeRoomWindow === "function") {
+    boundaryRegistry.removeRoomWindow(handle || roomState.handle);
+  }
+  if (roomRegistry && roomRegistry.activeRooms && typeof roomRegistry.activeRooms.delete === "function") {
+    roomRegistry.activeRooms.delete(handle || roomState.handle);
+  }
+  logger.info(
+    `commentRoom:room_closed handle=${handle || roomState.handle || "(unknown)"} reason=${roomState.liveEndedDetected ? "live_ended_overlay" : "not_live"}`
+  );
   return true;
 }
 
