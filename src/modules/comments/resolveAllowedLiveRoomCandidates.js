@@ -2,6 +2,7 @@ import { resolveLiveRoomCandidates } from "./resolveLiveRoomCandidates.js";
 
 /**
  * Resolve live room candidates for the allowed handle list.
+ * Discovery only; no room-window close or stop authority here.
  * @param {{ data?: object, deps: object }} ctx
  * @returns {Promise<Map<string, { handle: string, url: string, source: string }>>}
  */

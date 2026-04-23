@@ -1,4 +1,14 @@
 import { createRoomCommentCaptureState } from "./captureRoomCommentsTick.js";
+import { createCommentCaptureStorageState } from "./commentCaptureStorage.js";
+
+/**
+ * Create shared persistence state for room comment files.
+ * @param {{ data?: object, deps: object }} ctx
+ * @returns {object}
+ */
+export function createRoomCommentCapturePersistenceState(ctx) {
+  return createCommentCaptureStorageState(ctx);
+}
 
 /**
  * Create the full active room capture state record.
@@ -14,7 +24,8 @@ export function createRoomCommentCaptureSessionState(ctx) {
     liveRoomSource = "",
     userDataDir = "",
     remoteDebuggingPort = 0,
-    networkStream = null
+    networkStream = null,
+    commentPersistenceState = null
   } = data;
 
   return {
@@ -26,19 +37,24 @@ export function createRoomCommentCaptureSessionState(ctx) {
     notLiveStreak: 0,
     focusMissUntil: 0,
     captureState: createRoomCommentCaptureState(),
-    profileCacheState: data.profileCacheState || null,
-    commenterBackfillState: data.commenterBackfillState || null,
+    commentPersistenceState: commentPersistenceState || null,
     liveEndedDetected: false,
     liveEndedSignal: null,
     liveEndedStopping: false,
+    nonTargetNavigationDetected: false,
+    nonTargetNavigationSignal: null,
+    nonTargetNavigationStopping: false,
+    lastKnownRoomUrl: String(url || ""),
+    closeReason: null,
+    closeStartedAtMs: 0,
+    closeCompletedAtMs: 0,
+    closePromise: null,
     userDataDir,
     remoteDebuggingPort,
     networkStream,
     previousNetworkSnapshot: null,
     networkActivity: null,
-    stopping: false,
-    commenterBackfillWorkerPromise: null,
-    workerPromise: null
+    stopping: false
   };
 }
 
@@ -53,6 +69,10 @@ export function markRoomCommentCaptureLive(roomState, liveRoomUrl) {
   roomState.liveEndedDetected = false;
   roomState.liveEndedSignal = null;
   roomState.liveEndedStopping = false;
+  roomState.nonTargetNavigationDetected = false;
+  roomState.nonTargetNavigationSignal = null;
+  roomState.nonTargetNavigationStopping = false;
+  roomState.lastKnownRoomUrl = String(liveRoomUrl || roomState.url || roomState.lastKnownRoomUrl || "");
   return roomState;
 }
 
@@ -91,24 +111,6 @@ export function markRoomCommentCaptureStopping(roomState) {
   }
 
   roomState.stopping = true;
-  return roomState;
-}
-
-export function setRoomCommentCaptureWorkerPromise(roomState, workerPromise) {
-  if (!roomState) {
-    return roomState;
-  }
-
-  roomState.workerPromise = workerPromise || null;
-  return roomState;
-}
-
-export function setRoomCommenterBackfillWorkerPromise(roomState, workerPromise) {
-  if (!roomState) {
-    return roomState;
-  }
-
-  roomState.commenterBackfillWorkerPromise = workerPromise || null;
   return roomState;
 }
 

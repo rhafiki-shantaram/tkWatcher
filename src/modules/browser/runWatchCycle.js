@@ -40,10 +40,26 @@ export async function runWatchCycle(ctx) {
     );
   }
 
+  const targetOriginUrl = resolveOriginUrl(targetUrl);
+
+  try {
+    await page.goto(targetOriginUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: navigationTimeoutMs
+    });
+  } catch {
+    throw createStageError(
+      "page_load_timeout",
+      "Target origin navigation timed out.",
+      "E_PAGE_LOAD_TIMEOUT"
+    );
+  }
+
   const cookiesResult = await loadCookies({
     data: { cookiesPath, page },
     deps
   });
+  logger.info(`watchCycle:cookie_origin_prime url=${targetOriginUrl}`);
 
   try {
     await page.goto(targetUrl, {
@@ -99,24 +115,46 @@ export async function runWatchCycle(ctx) {
       data: { cookiesPath, page },
       deps
     });
+
+    try {
+      await page.goto(targetUrl, {
+        waitUntil: "load",
+        timeout: navigationTimeoutMs
+      });
+    } catch {
+      throw createStageError(
+        "page_load_timeout",
+        "Target navigation timed out after login recovery.",
+        "E_PAGE_LOAD_TIMEOUT"
+      );
+    }
   } else if (initialHeal.status === "target_not_found") {
     throw createStageError(
       "target_not_found_after_reload",
       "Target page not found after self-heal reload.",
       "E_TARGET_NOT_FOUND"
     );
+  } else if (initialHeal.status === "page_error") {
+    throw createStageError(
+      "page_error_after_reload",
+      "Page error stayed visible after self-heal reload.",
+      "E_PAGE_ERROR"
+    );
   }
 
-  const postHeal = initialHeal.status === "login_visible"
-    ? await selfHealTargetPage({
-        data: {
-          page,
-          targetUrl,
-          navigationTimeoutMs
-        },
-        deps
-      })
-    : initialHeal;
+  logger.info("watchCycle:freshness_reload_once");
+  const postHeal = await selfHealTargetPage({
+    data: {
+      page,
+      targetUrl,
+      navigationTimeoutMs
+    },
+    deps
+  });
+
+  if (initialHeal.status === "login_visible") {
+    logger.info("watchCycle:login_recovered_refresh_passed");
+  }
 
   if (postHeal.status === "login_visible") {
     throw createStageError(
@@ -131,6 +169,14 @@ export async function runWatchCycle(ctx) {
       "target_not_found_after_reload",
       "Target page not found after self-heal reload.",
       "E_TARGET_NOT_FOUND"
+    );
+  }
+
+  if (postHeal.status === "page_error") {
+    throw createStageError(
+      "page_error_after_reload",
+      "Page error stayed visible after self-heal reload.",
+      "E_PAGE_ERROR"
     );
   }
 
@@ -154,6 +200,7 @@ export async function runWatchCycle(ctx) {
       `ready=${watchSignals.pageReady ? 1 : 0}`,
       `loginLabel=${watchSignals.hasLoginLabel ? 1 : 0}`,
       `password=${watchSignals.hasPasswordField ? 1 : 0}`,
+      `pageError=${watchSignals.hasPageError ? 1 : 0}`,
       `targetText=${watchSignals.hasTargetSearchText ? 1 : 0}`,
       `liveBadge=${watchSignals.hasLiveBadge ? 1 : 0}`
     ].join(" ")
@@ -189,4 +236,13 @@ export async function runWatchCycle(ctx) {
     targetStatus,
     title
   };
+}
+
+function resolveOriginUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    return `${parsed.origin}/`;
+  } catch {
+    return String(rawUrl || "");
+  }
 }

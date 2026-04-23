@@ -1,5 +1,6 @@
 /**
  * Detect the TikTok live-ended overlay in a room window.
+ * Overlay-only: URL mismatch handled by room worker.
  * @param {{ data?: object, deps: object }} ctx
  * @returns {Promise<{ ended: boolean, reason: string, matchedText: string, matchedCount: number, selector: string }>}
  */

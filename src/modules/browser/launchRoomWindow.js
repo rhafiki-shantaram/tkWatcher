@@ -27,64 +27,87 @@ export async function launchRoomWindow(ctx) {
     process,
     roomHandle
   });
+  const navigationTimeoutMs = readPositiveInt(launchOptions.navigationTimeoutMs, 120000);
   const remoteDebuggingPort = await resolveRoomRemoteDebuggingPort({
     launchOptions,
     process
   });
-  const launchResult = await launchBrowser({
-    data: {
-      launchOptions: {
-        ...launchOptions,
-        remoteDebuggingPort,
-        userDataDir
-      }
-    },
-    deps
-  });
+  let launchResult = null;
 
-  if (cookiesPath) {
-    await launchResult.page.goto("about:blank", {
-      waitUntil: "load",
-      timeout: readPositiveInt(launchOptions.navigationTimeoutMs, 120000)
-    });
-    await loadCookies({
+  try {
+    launchResult = await launchBrowser({
       data: {
-        cookiesPath,
-        page: launchResult.page
+        launchOptions: {
+          ...launchOptions,
+          remoteDebuggingPort,
+          userDataDir
+        }
       },
       deps
     });
-  }
 
-  if (roomUrl) {
-    await launchResult.page.goto(roomUrl, {
-      waitUntil: "load",
-      timeout: readPositiveInt(launchOptions.navigationTimeoutMs, 120000)
+    if (cookiesPath) {
+      await launchResult.page.goto("about:blank", {
+        waitUntil: "load",
+        timeout: navigationTimeoutMs
+      });
+      await loadCookies({
+        data: {
+          cookiesPath,
+          page: launchResult.page
+        },
+        deps
+      });
+    }
+
+    if (roomUrl) {
+      await launchResult.page.goto(roomUrl, {
+        waitUntil: "load",
+        timeout: navigationTimeoutMs
+      });
+    }
+
+    const healResult = await selfHealTargetPage({
+      data: {
+        page: launchResult.page,
+        targetUrl: roomUrl,
+        navigationTimeoutMs
+      },
+      deps
     });
+    const surfaceResult = await ensureRoomCommentSurfaceReady({
+      data: {
+        page: launchResult.page,
+        roomUrl,
+        navigationTimeoutMs,
+        surfaceWaitMs: 5000
+      },
+      deps
+    });
+    const launchedAtMs = Date.now();
+
+    logger.info(
+      `roomWindow:launched handle=${roomHandle} ts=${launchedAtMs} cdpPort=${remoteDebuggingPort} userDataDir=${userDataDir}${cookiesPath ? ` cookiesPath=${cookiesPath}` : ""}${roomUrl ? ` url=${roomUrl}` : ""} heal=${healResult.status} surface=${surfaceResult.status}`
+    );
+
+    return {
+      ...launchResult,
+      roomHandle,
+      roomUrl,
+      userDataDir,
+      remoteDebuggingPort,
+      healStatus: healResult.status,
+      healSignals: healResult.signals,
+      surfaceStatus: surfaceResult.status,
+      surfaceSignals: surfaceResult.signals
+    };
+  } catch (error) {
+    logger.error(
+      `roomWindow:launch_failed handle=${roomHandle} userDataDir=${userDataDir} cdpPort=${remoteDebuggingPort} error=${error && typeof error === "object" ? (error.message || String(error)) : String(error)}`
+    );
+    await closeLaunchBrowserBestEffort(launchResult);
+    throw error;
   }
-
-  const healResult = await selfHealTargetPage({
-    data: {
-      page: launchResult.page,
-      targetUrl: roomUrl,
-      navigationTimeoutMs: readPositiveInt(launchOptions.navigationTimeoutMs, 120000)
-    },
-    deps
-  });
-
-  logger.info(
-    `roomWindow:launched handle=${roomHandle} cdpPort=${remoteDebuggingPort} userDataDir=${userDataDir}${cookiesPath ? ` cookiesPath=${cookiesPath}` : ""}${roomUrl ? ` url=${roomUrl}` : ""} heal=${healResult.status}`
-  );
-
-  return {
-    ...launchResult,
-    roomHandle,
-    roomUrl,
-    userDataDir,
-    remoteDebuggingPort,
-    healStatus: healResult.status,
-    healSignals: healResult.signals
-  };
 }
 
 function getDefaultRoomUserDataDir(ctx) {
@@ -101,9 +124,160 @@ function readPositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+async function ensureRoomCommentSurfaceReady(ctx) {
+  const { data = {}, deps } = ctx || {};
+  const {
+    page,
+    roomUrl = "",
+    navigationTimeoutMs = 120000,
+    surfaceWaitMs = 5000
+  } = data;
+  const { logger } = deps || {};
+
+  if (!page || !roomUrl) {
+    return {
+      status: "skipped",
+      signals: {
+        ready: false,
+        commentMessages: 0,
+        pageUrlMatches: false
+      }
+    };
+  }
+
+  await waitForRoomPageComplete({
+    data: { page, timeoutMs: Math.min(navigationTimeoutMs, surfaceWaitMs) },
+    deps
+  });
+
+  let signals = await probeRoomCommentSurface({
+    data: { page, roomUrl },
+    deps
+  });
+
+  if (signals.ready) {
+    return {
+      status: "ready",
+      signals
+    };
+  }
+
+  logger.info(
+    `roomWindow:comment_surface_missing_refresh_once url=${roomUrl} reason=missing_comments_after_nav_wait`
+  );
+
+  try {
+    await page.goto(roomUrl, {
+      waitUntil: "load",
+      timeout: navigationTimeoutMs
+    });
+  } catch {
+    return {
+      status: "reload_timeout",
+      signals
+    };
+  }
+
+  await waitForRoomPageComplete({
+    data: { page, timeoutMs: Math.min(navigationTimeoutMs, surfaceWaitMs) },
+    deps
+  });
+
+  signals = await probeRoomCommentSurface({
+    data: { page, roomUrl },
+    deps
+  });
+
+  if (signals.ready) {
+    logger.info(`roomWindow:comment_surface_ready_after_refresh url=${roomUrl}`);
+    return {
+      status: "ready_after_refresh",
+      signals
+    };
+  }
+
+  logger.info(`roomWindow:comment_surface_still_missing url=${roomUrl}`);
+  return {
+    status: "missing_after_refresh",
+    signals
+  };
+}
+
+async function waitForRoomPageComplete(ctx) {
+  const { data = {}, deps } = ctx || {};
+  const { page, timeoutMs = 5000 } = data;
+
+  if (!page) {
+    return;
+  }
+
+  try {
+    await page.waitForFunction(() => document.readyState === "complete", {
+      timeout: timeoutMs
+    });
+  } catch {
+    // Best effort.
+  }
+
+  try {
+    await page.waitForNetworkIdle({ idleTime: 1000, timeout: timeoutMs });
+  } catch {
+    // Best effort.
+  }
+}
+
+async function probeRoomCommentSurface(ctx) {
+  const { data = {} } = ctx || {};
+  const { page, roomUrl = "" } = data;
+
+  if (!page || typeof page.evaluate !== "function") {
+    return {
+      ready: false,
+      pageUrlMatches: false,
+      commentMessages: 0
+    };
+  }
+
+  try {
+    return await page.evaluate((payload) => {
+      const clean = (value) => String(value || "").trim();
+      const targetUrl = clean(payload?.roomUrl || "");
+      const currentUrl = clean(window.location.href || "");
+      const pageUrlMatches = !!targetUrl && currentUrl.startsWith(targetUrl);
+      const commentMessages = document.querySelectorAll('div[data-e2e="chat-message"]').length;
+
+      return {
+        ready: pageUrlMatches && commentMessages > 0,
+        pageUrlMatches,
+        commentMessages
+      };
+    }, { roomUrl });
+  } catch {
+    return {
+      ready: false,
+      pageUrlMatches: false,
+      commentMessages: 0
+    };
+  }
+}
+
 async function resolveRoomRemoteDebuggingPort(ctx) {
   const { launchOptions = {} } = ctx;
   return await findFreePortFrom(0);
+}
+
+async function closeLaunchBrowserBestEffort(launchResult) {
+  if (!launchResult || !launchResult.browser || typeof launchResult.browser.close !== "function") {
+    return false;
+  }
+
+  try {
+    await launchResult.browser.close();
+  } catch {
+    // Best effort.
+  }
+
+  return true;
 }
 
 async function findFreePortFrom(startPort) {

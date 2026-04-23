@@ -1,6 +1,6 @@
 import { createWindowBoundaryRegistry } from "../browser/windowBoundaryRegistry.js";
 import { createCommentCaptureStageError } from "./commentCaptureStageError.js";
-import { createCommenterBackfillState } from "./commenterBackfillState.js";
+import { createRoomCommentCapturePersistenceState } from "./roomCommentCaptureState.js";
 import { closeAllRoomCommentCaptureSessions, syncRoomCommentCaptureSession } from "./roomCommentCaptureLifecycle.js";
 import { resolveAllowedLiveRoomCandidates } from "./resolveAllowedLiveRoomCandidates.js";
 
@@ -17,6 +17,8 @@ export async function runCommentLiveCaptureLoop(ctx) {
     cookiesPath = "",
     launchOptions = {},
     notLiveStreakThreshold = 5,
+    commentCaptureStorageRoot = "C:\\tkWatcher\\data\\comments",
+    commentPersistenceState = null
   } = data;
 
   if (!watcherPage) {
@@ -31,10 +33,19 @@ export async function runCommentLiveCaptureLoop(ctx) {
   const roomRegistry = {
     activeRooms: new Map()
   };
-  const sharedProfileCacheState = {
-    byUserName: new Map()
+  const roomLifecycleTraceState = {
+    lastStopByHandle: new Map(),
+    launchCooldownByHandle: new Map(),
+    launchFailureCooldownByHandle: new Map(),
+    liveEndedCooldownMs: 5000,
+    launchFailureCooldownMs: 15000
   };
-  const sharedCommenterBackfillState = createCommenterBackfillState();
+  const sharedCommentPersistenceState = commentPersistenceState || createRoomCommentCapturePersistenceState({
+    data: {
+      storageRoot: commentCaptureStorageRoot
+    },
+    deps
+  });
   const allowedHandleList = normalizeAllowedHandles(targetHandles);
   const discoveryPollMs = 1000;
   const heartbeatMs = 300000;
@@ -51,65 +62,68 @@ export async function runCommentLiveCaptureLoop(ctx) {
   });
   let nextHeartbeatAt = Date.now() + heartbeatMs;
 
-  while (!watcherPage.isClosed()) {
-    if (watcherPage.isClosed()) {
-      throw createCommentCaptureStageError(
-        "comment_watcher_page_closed",
-        "Watcher page closed mid loop.",
-        "E_COMMENT_WATCHER_PAGE_CLOSED"
-      );
-    }
+  try {
+    while (!watcherPage.isClosed()) {
+      if (watcherPage.isClosed()) {
+        throw createCommentCaptureStageError(
+          "comment_watcher_page_closed",
+          "Watcher page closed mid loop.",
+          "E_COMMENT_WATCHER_PAGE_CLOSED"
+        );
+      }
 
-    const liveByHandle = await resolveAllowedLiveRoomCandidates({
-      data: {
-        page: watcherPage,
-        allowedHandles: allowedHandleList
-      },
-      deps
-    });
-
-    for (const handle of allowedHandleList) {
-      await syncRoomCommentCaptureSession({
+      const liveByHandle = await resolveAllowedLiveRoomCandidates({
         data: {
-          handle,
-          liveRoom: liveByHandle.get(handle) || null,
-          roomRegistry,
-          boundaryRegistry,
-          sharedProfileCacheState,
-          sharedCommenterBackfillState,
-          cookiesPath,
-          launchOptions,
-          focusCooldownMs,
-          roomTickMs,
-          notLiveStreakThreshold,
-          requestWatcherRefresh
+          page: watcherPage,
+          allowedHandles: allowedHandleList
         },
-        deps,
-        withFocusLock
+        deps
       });
-    }
 
-    await maybeRunWatcherHeartbeat({
+      for (const handle of allowedHandleList) {
+        await syncRoomCommentCaptureSession({
+          data: {
+            handle,
+            liveRoom: liveByHandle.get(handle) || null,
+            roomRegistry,
+            boundaryRegistry,
+            lifecycleTraceState: roomLifecycleTraceState,
+            commentPersistenceState: sharedCommentPersistenceState,
+            cookiesPath,
+            launchOptions,
+            focusCooldownMs,
+            roomTickMs,
+            notLiveStreakThreshold,
+            requestWatcherRefresh
+          },
+          deps,
+          withFocusLock
+        });
+      }
+
+      await maybeRunWatcherHeartbeat({
+        data: {
+          requestWatcherRefresh,
+          nextHeartbeatAt,
+          heartbeatMs
+        },
+        deps
+      }).then((updatedNextHeartbeatAt) => {
+        nextHeartbeatAt = updatedNextHeartbeatAt;
+      });
+
+      await sleep(discoveryPollMs, deps);
+    }
+  } finally {
+    await closeAllRoomCommentCaptureSessions({
       data: {
-        requestWatcherRefresh,
-        nextHeartbeatAt,
-        heartbeatMs
+        roomRegistry,
+        boundaryRegistry,
+        lifecycleTraceState: roomLifecycleTraceState
       },
       deps
-    }).then((updatedNextHeartbeatAt) => {
-      nextHeartbeatAt = updatedNextHeartbeatAt;
     });
-
-    await sleep(discoveryPollMs, deps);
   }
-
-  await closeAllRoomCommentCaptureSessions({
-    data: {
-      roomRegistry,
-      boundaryRegistry
-    },
-    deps
-  });
 
   return {
     activeRooms: roomRegistry.activeRooms.size,

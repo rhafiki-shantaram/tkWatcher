@@ -32,9 +32,9 @@ export async function resolveLiveRoomUrl(ctx) {
         return "";
       });
       if (resolved) {
-        const parsed = parseHandleFromUrl(resolved);
+        const parsed = parseLiveRoomUrl(resolved);
         return {
-          url: resolved,
+          url: parsed.url,
           source: "dom_link",
           handle: parsed.handle
         };
@@ -48,44 +48,93 @@ export async function resolveLiveRoomUrl(ctx) {
 }
 
 function resolveFromUrl(rawUrl) {
-  const value = String(rawUrl || "").trim();
-  if (!value) {
+  const parsed = parseLiveRoomUrl(rawUrl);
+  if (parsed.status !== "matched") {
     return null;
   }
 
-  try {
-    const parsed = new URL(value);
-    const resolved = parseHandleFromUrl(parsed.toString());
-    if (!resolved.handle) {
-      return null;
-    }
-
-    return {
-      url: `https://www.tiktok.com/@${encodeURIComponent(resolved.handle)}/live`,
-      handle: resolved.handle
-    };
-  } catch {
-    return null;
-  }
+  return {
+    url: parsed.url,
+    handle: parsed.handle
+  };
 }
 
-function parseHandleFromUrl(rawUrl) {
+export function parseLiveRoomUrl(rawUrl) {
   const value = String(rawUrl || "").trim();
   if (!value) {
-    return { handle: "" };
+    return {
+      status: "missing",
+      handle: "",
+      url: ""
+    };
   }
 
   try {
-    const parsed = new URL(value);
+    const parsed = new URL(value, "https://www.tiktok.com");
+    const hostname = String(parsed.hostname || "").toLowerCase();
+    if (hostname !== "tiktok.com" && !hostname.endsWith(".tiktok.com")) {
+      return {
+        status: "invalid",
+        handle: "",
+        url: ""
+      };
+    }
     const pathname = String(parsed.pathname || "");
-    const match = pathname.match(/\/@([^/]+)/);
+    const match = pathname.match(/\/@([^/]+)(?:\/live(?:\/)?)?(?:\/)?$/i) || pathname.match(/\/@([^/]+)/i);
     if (!match || !match[1]) {
-      return { handle: "" };
+      return {
+        status: "missing",
+        handle: "",
+        url: ""
+      };
     }
 
     const handle = decodeURIComponent(match[1]).trim().toLowerCase();
-    return { handle };
+    if (!handle) {
+      return {
+        status: "missing",
+        handle: "",
+        url: ""
+      };
+    }
+
+    return {
+      status: "matched",
+      handle,
+      url: `https://www.tiktok.com/@${encodeURIComponent(handle)}/live`
+    };
   } catch {
-    return { handle: "" };
+    return {
+      status: "invalid",
+      handle: "",
+      url: ""
+    };
   }
+}
+
+export function inspectLiveRoomNavigation(rawUrl, targetHandle = "") {
+  const parsed = parseLiveRoomUrl(rawUrl);
+  const expectedHandle = String(targetHandle || "").trim().toLowerCase();
+
+  if (parsed.status !== "matched" || !parsed.handle) {
+    return {
+      rawUrl: String(rawUrl || ""),
+      matchedUrl: "",
+      matchedHandle: "",
+      expectedHandle,
+      isTargetHandle: false,
+      isNonTargetLive: false,
+      reason: parsed.status === "invalid" ? "invalid" : "ambiguous"
+    };
+  }
+
+  return {
+    rawUrl: String(rawUrl || ""),
+    matchedUrl: parsed.url,
+    matchedHandle: parsed.handle,
+    expectedHandle,
+    isTargetHandle: Boolean(expectedHandle) && parsed.handle === expectedHandle,
+    isNonTargetLive: Boolean(expectedHandle) && parsed.handle !== expectedHandle,
+    reason: Boolean(expectedHandle) && parsed.handle !== expectedHandle ? "non_target_live" : "target_live"
+  };
 }

@@ -21,12 +21,29 @@ export async function probeWatchSignals(ctx) {
       }
     };
 
-    const containsLiveBadge = ({ bodyText, root }) => {
+    const containsLiveBadge = ({ root }) => {
+      const liveBadgeSelectors = [
+        "span[class*='LiveBadge']",
+        "span[class*='livebadge']",
+        "[data-e2e*='live-badge']",
+        "[data-e2e*='livebadge']",
+        "a[href*='/live'] span"
+      ];
+
       const exactTextMatch = Array.from(
         root.querySelectorAll("span, div, button, a")
       ).some((el) => String(el.innerText || el.textContent || "").trim() === "LIVE");
 
-      return exactTextMatch || bodyText.includes(" live ");
+      if (exactTextMatch) {
+        return true;
+      }
+
+      return liveBadgeSelectors.some((selector) =>
+        Array.from(root.querySelectorAll(selector)).some((el) => {
+          const text = String(el.innerText || el.textContent || "").trim();
+          return text === "LIVE";
+        })
+      );
     };
 
     const readyState = document.readyState;
@@ -39,14 +56,15 @@ export async function probeWatchSignals(ctx) {
     const hasPasswordField = !!document.querySelector("input[type='password']");
 
     const bodyText = String(document.body?.innerText || "").toLowerCase();
+    const hasPageError =
+      bodyText.includes("something went wrong") ||
+      bodyText.includes("sorry, something wrong with the server") ||
+      bodyText.includes("please try again");
     const query = normalizeSearchTerm(ctxData.targetUrl);
     const hasTargetSearchText = hasSearchTitle || (query
       ? bodyText.includes(query.toLowerCase())
       : false);
-    const hasLiveBadge = containsLiveBadge({
-      bodyText,
-      root: document
-    });
+    const hasLiveBadge = containsLiveBadge({ root: document });
 
     return {
       readyState,
@@ -54,6 +72,7 @@ export async function probeWatchSignals(ctx) {
       hasSearchTitle,
       hasLoginLabel,
       hasPasswordField,
+      hasPageError,
       hasTargetSearchText,
       hasLiveBadge
     };
@@ -66,6 +85,7 @@ export async function probeWatchSignals(ctx) {
     hasSearchTitle: result.hasSearchTitle,
     hasLoginLabel: result.hasLoginLabel,
     hasPasswordField: result.hasPasswordField,
+    hasPageError: result.hasPageError,
     hasTargetSearchText: result.hasTargetSearchText,
     hasLiveBadge: result.hasLiveBadge
   };

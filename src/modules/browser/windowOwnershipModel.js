@@ -15,7 +15,6 @@ export function getWindowOwnershipModel() {
       ],
       doesNotOwn: [
         "Per-room comment capture",
-        "Per-room profile popover scraping",
         "Room lifecycle teardown"
       ],
       foregroundRequired: false
@@ -26,8 +25,7 @@ export function getWindowOwnershipModel() {
       owns: [
         "One allowed live room",
         "Comment capture state",
-        "Comment persistence and console emission",
-        "Any room-specific fallback capture steps"
+        "Comment persistence and console emission"
       ],
       doesNotOwn: [
         "Watcher live discovery",

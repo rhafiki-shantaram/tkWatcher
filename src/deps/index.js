@@ -21,6 +21,7 @@ export function createDeps(ctx = {}) {
       puppeteer,
       puppeteerExtra,
       stealthPlugin,
+      fetch: globalThis.fetch,
       Buffer,
       URL,
       Date,

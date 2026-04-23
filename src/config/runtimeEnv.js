@@ -25,6 +25,18 @@ export const runtimeEnvContract = [
     note: "Start the live-room comment capture loop."
   },
   {
+    key: "COMMENT_CAPTURE_STORAGE_ROOT",
+    required: false,
+    defaultValue: "C:\\tkWatcher\\data\\comments",
+    note: "Local comment file root."
+  },
+  {
+    key: "COMMENT_INGEST_ENABLED",
+    required: false,
+    defaultValue: false,
+    note: "Reserved for future HTTP ingest re-enable."
+  },
+  {
     key: "CDP_REMOTE_DEBUGGING_PORT",
     required: false,
     defaultValue: null,
@@ -47,6 +59,30 @@ export const runtimeEnvContract = [
     required: false,
     defaultValue: 1500,
     note: "Polling interval while waiting for login."
+  },
+  {
+    key: "COMMENT_INGEST_TEST_BASE_URL",
+    required: false,
+    defaultValue: "https://dev-sitex2082572611.wixdev-sites.org/",
+    note: "Legacy HTTP ingest setting. Inactive while COMMENT_INGEST_ENABLED=false."
+  },
+  {
+    key: "COMMENT_INGEST_PROD_BASE_URL",
+    required: false,
+    defaultValue: "",
+    note: "Legacy HTTP ingest setting. Inactive while COMMENT_INGEST_ENABLED=false."
+  },
+  {
+    key: "COMMENT_INGEST_PATH",
+    required: false,
+    defaultValue: "/_functions/commentIngestTest",
+    note: "Legacy HTTP ingest setting. Inactive while COMMENT_INGEST_ENABLED=false."
+  },
+  {
+    key: "COMMENT_INGEST_DRY_RUN",
+    required: false,
+    defaultValue: false,
+    note: "Legacy HTTP ingest setting. Inactive while COMMENT_INGEST_ENABLED=false."
   }
 ];
 
@@ -100,10 +136,16 @@ export function readRuntimeEnv(env) {
     cookiesPath: readStringEnv(env.COOKIES_PATH, "cookies.json"),
     keepAlive: readBoolEnv(env.KEEP_ALIVE, false),
     commentCapture: readBoolEnv(env.COMMENT_CAPTURE, false),
+    commentCaptureStorageRoot: readStringEnv(env.COMMENT_CAPTURE_STORAGE_ROOT, "C:\\tkWatcher\\data\\comments"),
+    commentIngestEnabled: readBoolEnv(env.COMMENT_INGEST_ENABLED, false),
     cdpRemoteDebuggingPort: readIntEnv(env.CDP_REMOTE_DEBUGGING_PORT, null),
     navigationTimeoutMs: readIntEnv(env.NAVIGATION_TIMEOUT_MS, 120000),
     loginWaitMs: readIntEnv(env.LOGIN_WAIT_MS, 120000),
-    loginPollMs: readIntEnv(env.LOGIN_POLL_MS, 1500)
+    loginPollMs: readIntEnv(env.LOGIN_POLL_MS, 1500),
+    commentIngestTestBaseUrl: readStringEnv(env.COMMENT_INGEST_TEST_BASE_URL, "https://dev-sitex2082572611.wixdev-sites.org/"),
+    commentIngestProdBaseUrl: readStringEnv(env.COMMENT_INGEST_PROD_BASE_URL),
+    commentIngestPath: readStringEnv(env.COMMENT_INGEST_PATH, "/_functions/commentIngestTest"),
+    commentIngestDryRun: readBoolEnv(env.COMMENT_INGEST_DRY_RUN, false)
   };
 }
 

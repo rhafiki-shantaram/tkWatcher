@@ -27,6 +27,10 @@ export async function detectTargetStatus(ctx) {
       return buildResult("UNKNOWN", false, false, signals);
     }
 
+    if (signals.hasPageError) {
+      return buildResult("UNKNOWN", false, false, signals);
+    }
+
     if (!signals.hasTargetSearchText) {
       return buildResult("NOT_FOUND", false, false, signals);
     }
@@ -59,7 +63,8 @@ function buildResult(status, found, live, signals) {
       liveBadge: !!signals.hasLiveBadge,
       liveLink: !!signals.hasLiveBadge,
       loginLabel: !!signals.hasLoginLabel,
-      passwordField: !!signals.hasPasswordField
+      passwordField: !!signals.hasPasswordField,
+      pageError: !!signals.hasPageError
     }
   };
 }

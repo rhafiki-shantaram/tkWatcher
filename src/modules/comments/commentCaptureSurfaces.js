@@ -17,25 +17,21 @@ export function getCommentCaptureSurfaces() {
       role: "room",
       responsibilities: [
         "Observe live-room comment stream",
-        "Open commenter profile popovers when needed",
-        "Read profile data from DOM or network fallback",
+        "Read live comment rows directly from the room DOM",
         "Persist comment capture rows"
       ],
-      foregroundRequired: false,
-      foregroundFallbackOnly: true
+      foregroundRequired: false
     },
     focusDependentSteps: [
-      "OrderBot-style profile popover capture",
-      "Any fallback step that TikTok only reveals after real tab focus"
+      "Room window launch and close validation"
     ],
     focusIndependentSteps: [
       "Live-room tab spawn and close",
       "Direct DOM reads from the live tab",
-      "Network-backed profile extraction",
       "Status probing from the watcher tab"
     ],
     notes: [
-      "Foreground should be a fallback, not the default capture path.",
+      "Direct DOM capture is the only comment path.",
       "Comment capture is layered on top of the existing logged-in watcher session."
     ]
   };

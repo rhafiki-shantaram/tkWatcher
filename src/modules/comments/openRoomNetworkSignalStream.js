@@ -1,6 +1,7 @@
 /**
  * Open a passive CDP network stream for a live-room page.
- * Phase 1 only: observe and retain raw events, no classification or focus logic.
+ * Phase 1 only: observe and retain raw events, no classification or stop logic.
+ * Observability only; room worker owns stop decisions.
  * @param {{ data?: object, deps: object }} ctx
  * @returns {Promise<{ client: any, close: Function, snapshot: Function }>}
  */

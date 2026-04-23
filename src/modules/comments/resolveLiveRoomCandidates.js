@@ -1,5 +1,8 @@
+import { parseLiveRoomUrl } from "./resolveLiveRoomUrl.js";
+
 /**
  * Resolve live room candidates from the watcher page.
+ * Discovery only; room-window stop logic belongs elsewhere.
  * @param {{ data?: object, deps: object }} ctx
  * @returns {Promise<Array<{ handle: string, url: string, source: string }>>}
  */
@@ -14,7 +17,7 @@ export async function resolveLiveRoomCandidates(ctx) {
   try {
     const candidates = await page.evaluate(() => {
       const clean = (value) => String(value || "").trim();
-      const handles = new Map();
+      const urls = new Set();
 
       const liveLinks = Array.from(document.querySelectorAll('a[href*="/live"]'));
       for (const link of liveLinks) {
@@ -25,28 +28,34 @@ export async function resolveLiveRoomCandidates(ctx) {
 
         try {
           const normalized = new URL(href, window.location.origin).toString();
-          const match = normalized.match(/\/@([^/]+)\/live/i);
-          const handle = clean(
-            decodeURIComponent(match?.[1] || normalized.split("/@")[1]?.split("/")[0] || "")
-          ).toLowerCase();
-          if (!handle) {
-            continue;
-          }
-
-          handles.set(handle, {
-            handle,
-            url: `https://www.tiktok.com/@${encodeURIComponent(handle)}/live`,
-            source: "dom_live_link"
-          });
+          urls.add(normalized);
         } catch {
           // Best effort.
         }
       }
 
-      return Array.from(handles.values());
+      return Array.from(urls.values());
     });
 
-    return Array.isArray(candidates) ? candidates : [];
+    if (!Array.isArray(candidates)) {
+      return [];
+    }
+
+    const handles = new Map();
+    for (const candidateUrl of candidates) {
+      const parsed = parseLiveRoomUrl(candidateUrl);
+      if (parsed.status !== "matched" || !parsed.handle) {
+        continue;
+      }
+
+      handles.set(parsed.handle, {
+        handle: parsed.handle,
+        url: parsed.url,
+        source: "dom_live_link"
+      });
+    }
+
+    return Array.from(handles.values());
   } catch {
     return [];
   }

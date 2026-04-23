@@ -45,7 +45,8 @@ async function main(ctx) {
     commentCapture,
     navigationTimeoutMs,
     loginWaitMs,
-    loginPollMs
+    loginPollMs,
+    commentCaptureStorageRoot
   } = runtimeEnv;
 
   if (!tiktokUrl) {
@@ -56,7 +57,7 @@ async function main(ctx) {
   }
 
   logger.info(
-    `Runtime env contract active: TIKTOK_URL, TARGET_HANDLES, COOKIES_PATH, KEEP_ALIVE, COMMENT_CAPTURE, CDP_REMOTE_DEBUGGING_PORT, NAVIGATION_TIMEOUT_MS, LOGIN_WAIT_MS, LOGIN_POLL_MS`
+    `Runtime env contract active: TIKTOK_URL, TARGET_HANDLES, COOKIES_PATH, KEEP_ALIVE, COMMENT_CAPTURE, COMMENT_CAPTURE_STORAGE_ROOT, CDP_REMOTE_DEBUGGING_PORT, NAVIGATION_TIMEOUT_MS, LOGIN_WAIT_MS, LOGIN_POLL_MS, COMMENT_INGEST_ENABLED`
   );
   logger.info(
     `Runtime env values: targetHandles=${targetHandles.join(",")} cookiesPath=${cookiesPath}`
@@ -68,7 +69,6 @@ async function main(ctx) {
     },
     deps
   });
-
   try {
     logger.info("CDP harness ready.");
     const runResult = await runWatchCycle({
@@ -96,7 +96,8 @@ async function main(ctx) {
           cookiesPath,
           targetHandles,
           launchOptions,
-          notLiveStreakThreshold: 5
+          notLiveStreakThreshold: 5,
+          commentCaptureStorageRoot
         },
         deps
       });
