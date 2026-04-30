@@ -44,7 +44,7 @@ export async function runWatchCycle(ctx) {
 
   try {
     await page.goto(targetOriginUrl, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "load",
       timeout: navigationTimeoutMs
     });
   } catch {
@@ -54,6 +54,14 @@ export async function runWatchCycle(ctx) {
       "E_PAGE_LOAD_TIMEOUT"
     );
   }
+
+  await waitForFirstContentfulPaint({
+    data: {
+      page,
+      timeoutMs: Math.min(navigationTimeoutMs, 15000)
+    },
+    deps
+  });
 
   const cookiesResult = await loadCookies({
     data: { cookiesPath, page },
@@ -67,18 +75,15 @@ export async function runWatchCycle(ctx) {
       timeout: navigationTimeoutMs
     });
   } catch {
-    throw createStageError(
-      "page_load_timeout",
-      "Target navigation timed out.",
-      "E_PAGE_LOAD_TIMEOUT"
-    );
+    logger.info("watchCycle:target_navigation_load_timeout_continue");
   }
 
   const initialHeal = await selfHealTargetPage({
     data: {
       page,
       targetUrl,
-      navigationTimeoutMs
+      navigationTimeoutMs,
+      loginVisibleRefreshRetries: cookiesResult.loaded ? 2 : 0
     },
     deps
   });
@@ -147,7 +152,8 @@ export async function runWatchCycle(ctx) {
     data: {
       page,
       targetUrl,
-      navigationTimeoutMs
+      navigationTimeoutMs,
+      loginVisibleRefreshRetries: cookiesResult.loaded ? 2 : 0
     },
     deps
   });
@@ -244,5 +250,27 @@ function resolveOriginUrl(rawUrl) {
     return `${parsed.origin}/`;
   } catch {
     return String(rawUrl || "");
+  }
+}
+
+async function waitForFirstContentfulPaint(ctx) {
+  const { data = {}, deps } = ctx || {};
+  const { page, timeoutMs = 15000 } = data;
+  const { logger } = deps || {};
+
+  if (!page || typeof page.evaluate !== "function") {
+    return;
+  }
+
+  const startMs = Date.now();
+
+  try {
+    await page.waitForFunction(() => {
+      const paintEntries = performance.getEntriesByType("paint");
+      return paintEntries.some((entry) => entry && entry.name === "first-contentful-paint");
+    }, { timeout: timeoutMs });
+    logger?.info("watchCycle:origin_fcp_ready");
+  } catch {
+    logger?.info(`watchCycle:origin_fcp_timeout elapsedMs=${Date.now() - startMs}`);
   }
 }

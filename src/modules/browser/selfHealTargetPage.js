@@ -11,9 +11,11 @@ export async function selfHealTargetPage(ctx) {
   const {
     page,
     targetUrl = "",
-    navigationTimeoutMs = 120000
+    navigationTimeoutMs = 120000,
+    loginVisibleRefreshRetries = 0
   } = data;
   const { logger } = deps;
+  const retryCount = readNonNegativeInt(loginVisibleRefreshRetries, 0);
 
   if (!page) {
     throw new Error("Missing page for self-heal.");
@@ -29,9 +31,33 @@ export async function selfHealTargetPage(ctx) {
     deps
   });
 
+  if (signals.hasTargetSearchText) {
+    logger.info("selfHeal:target_found");
+    return { status: "healthy_after_reload", signals };
+  }
+
+  if (signals.hasPageError) {
+    logger.info("selfHeal:page_error");
+    if (retryCount <= 0) {
+      return { status: "page_error", signals };
+    }
+
+    return await retryTransientRefresh({
+      data: { page, targetUrl, navigationTimeoutMs, retryCount, signals, initialReason: "page_error" },
+      deps
+    });
+  }
+
   if (signals.hasLoginLabel || signals.hasPasswordField) {
     logger.info("selfHeal:login_visible");
-    return { status: "login_visible", signals };
+    if (retryCount <= 0) {
+      return { status: "login_visible", signals };
+    }
+
+    return await retryTransientRefresh({
+      data: { page, targetUrl, navigationTimeoutMs, retryCount, signals, initialReason: "login_visible" },
+      deps
+    });
   }
 
   logger.info(
@@ -81,6 +107,80 @@ export async function selfHealTargetPage(ctx) {
   return { status: "target_not_found", signals };
 }
 
+async function retryTransientRefresh(ctx) {
+  const { data = {}, deps } = ctx;
+  const {
+    page,
+    targetUrl = "",
+    navigationTimeoutMs = 120000,
+    retryCount = 0,
+    signals: initialSignals,
+    initialReason = "login_visible"
+  } = data;
+  const { logger } = deps;
+  let signals = initialSignals;
+
+  for (let attempt = 1; attempt <= retryCount; attempt += 1) {
+    logger.info(`selfHeal:${initialReason}_wait_then_retry attempt=${attempt}`);
+
+    await waitForPageComplete({
+      data: { page, timeoutMs: Math.min(navigationTimeoutMs, 15000) },
+      deps
+    });
+
+    try {
+      await page.reload({
+        waitUntil: "load",
+        timeout: navigationTimeoutMs
+      });
+    } catch {
+      throw createStageError(
+        "target_reload_timeout",
+        "Target reload timed out.",
+        "E_TARGET_RELOAD_TIMEOUT"
+      );
+    }
+
+    await waitForPageComplete({
+      data: { page, timeoutMs: Math.min(navigationTimeoutMs, 15000) },
+      deps
+    });
+
+    signals = await probeWatchSignals({
+      data: { page, targetUrl },
+      deps
+    });
+
+    if (signals.hasPageError) {
+      if (attempt < retryCount) {
+        continue;
+      }
+
+      logger.info("selfHeal:page_error_after_retry");
+      return { status: "page_error", signals };
+    }
+
+    if (signals.hasTargetSearchText) {
+      logger.info("selfHeal:target_found_after_retry");
+      return { status: "healthy_after_reload", signals };
+    }
+
+    if (signals.hasLoginLabel || signals.hasPasswordField) {
+      if (attempt < retryCount) {
+        continue;
+      }
+
+      logger.info("selfHeal:login_visible_after_retry");
+      return { status: "login_visible", signals };
+    }
+
+    logger.info("selfHeal:target_not_found_after_retry");
+    return { status: "target_not_found", signals };
+  }
+
+  return { status: "login_visible", signals };
+}
+
 async function waitForPageComplete(ctx) {
   const { data = {}, deps } = ctx;
   const { page, timeoutMs = 15000 } = data;
@@ -105,4 +205,9 @@ async function waitForPageComplete(ctx) {
   }
 
   logger.info("selfHeal:page_ready");
+}
+
+function readNonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }

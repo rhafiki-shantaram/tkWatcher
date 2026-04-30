@@ -33,6 +33,7 @@ export async function launchRoomWindow(ctx) {
     process
   });
   let launchResult = null;
+  let cookiesLoaded = false;
 
   try {
     launchResult = await launchBrowser({
@@ -51,13 +52,14 @@ export async function launchRoomWindow(ctx) {
         waitUntil: "load",
         timeout: navigationTimeoutMs
       });
-      await loadCookies({
+      const cookiesResult = await loadCookies({
         data: {
           cookiesPath,
           page: launchResult.page
         },
         deps
       });
+      cookiesLoaded = !!cookiesResult.loaded;
     }
 
     if (roomUrl) {
@@ -71,7 +73,8 @@ export async function launchRoomWindow(ctx) {
       data: {
         page: launchResult.page,
         targetUrl: roomUrl,
-        navigationTimeoutMs
+        navigationTimeoutMs,
+        loginVisibleRefreshRetries: cookiesLoaded ? 2 : 0
       },
       deps
     });

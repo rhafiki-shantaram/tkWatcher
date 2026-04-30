@@ -23,15 +23,15 @@ export async function detectTargetStatus(ctx) {
       return buildResult("UNKNOWN", false, false, signals);
     }
 
-    if (signals.hasLoginLabel || signals.hasPasswordField) {
-      return buildResult("UNKNOWN", false, false, signals);
-    }
-
-    if (signals.hasPageError) {
-      return buildResult("UNKNOWN", false, false, signals);
-    }
-
     if (!signals.hasTargetSearchText) {
+      if (signals.hasLoginLabel || signals.hasPasswordField) {
+        return buildResult("UNKNOWN", false, false, signals);
+      }
+
+      if (signals.hasPageError) {
+        return buildResult("UNKNOWN", false, false, signals);
+      }
+
       return buildResult("NOT_FOUND", false, false, signals);
     }
 
